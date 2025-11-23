@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ConversationAI - Sales Intelligence Platform</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/vue-router@4/dist/vue-router.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <h1>ConversationAI</h1>
+                    <span class="tagline">Sales Intelligence Platform</span>
+                </div>
+                <div class="header-controls">
+                    <div class="call-status">
+                        <span class="status-indicator" :class="{ active: callSession.status === 'active' }"></span>
+                        <span>{{ callSession.status === 'active' ? 'Live Call Active' : 'No Active Call' }}</span>
+                    </div>
+                    <button class="btn btn--secondary btn--sm">Settings</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="nav-tabs">
+            <router-link to="/" class="nav-tab" active-class="active">Live Call Monitor</router-link>
+            <router-link to="/post-call" class="nav-tab" active-class="active">Post-Call Analytics</router-link>
+            <router-link to="/coaching" class="nav-tab" active-class="active">Coaching & Training</router-link>
+            <router-link to="/manager" class="nav-tab" active-class="active">Manager Dashboard</router-link>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <router-view></router-view>
+        </main>
+    </div>
+
+    <!-- Vue Component Templates -->
+    <script type="text/x-template" id="live-call-monitor-template">
+        <div class="live-monitor-grid">
+            <!-- Call Controls -->
+            <div class="panel call-controls">
+                <call-controls></call-controls>
+            </div>
+
+            <!-- Live Transcription -->
+            <div class="panel transcription-panel">
+                <live-transcription></live-transcription>
+            </div>
+
+            <!-- Real-Time Metrics -->
+            <div class="panel metrics-panel">
+                <h3>Real-Time Metrics</h3>
+                <div class="metrics-grid">
+                    <talk-listen-ratio></talk-listen-ratio>
+                    <speaking-pace></speaking-pace>
+                    <filler-words></filler-words>
+                </div>
+            </div>
+
+            <!-- Sentiment Analysis -->
+            <div class="panel sentiment-panel">
+                <sentiment-analysis></sentiment-analysis>
+            </div>
+
+            <!-- RTA Coaching Panel -->
+            <div class="panel rta-panel">
+                <rta-cards></rta-cards>
+            </div>
+
+            <!-- Manager Controls -->
+            <div class="panel manager-controls">
+                <whisper-controls></whisper-controls>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="post-call-analytics-template">
+        <div class="post-call-grid">
+            <div class="panel">
+                <call-summary></call-summary>
+            </div>
+
+            <div class="panel">
+                <smart-trackers></smart-trackers>
+            </div>
+
+            <div class="panel full-transcript">
+                <h3>Full Transcript</h3>
+                <div class="transcript-search">
+                    <input type="text" v-model="searchTerm" placeholder="Search transcript..." class="form-control">
+                </div>
+                <div class="transcript-content">
+                    <div v-for="entry in filteredTranscript" :key="entry.id" :class="['transcript-message', entry.type]">
+                        <span class="speaker">{{ entry.speaker }}</span>
+                        <span class="text">{{ entry.text }}</span>
+                        <span class="timestamp">{{ entry.timestamp }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel performance-chart">
+                <h3>Sentiment Throughout Call</h3>
+                <div class="chart-container" style="position: relative; height: 300px;">
+                    <canvas ref="callSentimentChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="coaching-training-template">
+        <div class="coaching-grid">
+            <div class="panel">
+                <performance-scorecard></performance-scorecard>
+            </div>
+
+            <div class="panel">
+                <coaching-panel></coaching-panel>
+            </div>
+
+            <div class="panel">
+                <h3>Training Recommendations</h3>
+                <div class="training-cards">
+                    <div class="training-card">
+                        <h4>Competitive Positioning</h4>
+                        <p>Master battle cards for Salesforce, HubSpot, and Pipedrive</p>
+                        <button class="btn btn--primary btn--sm">Start Training</button>
+                    </div>
+                    <div class="training-card">
+                        <h4>Budget Objection Handling</h4>
+                        <p>Practice ROI conversations and value selling techniques</p>
+                        <button class="btn btn--primary btn--sm">Start Training</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Virtual Practice Partner</h3>
+                <div class="practice-interface">
+                    <div class="scenario-selector">
+                        <select class="form-control" v-model="selectedScenario">
+                            <option>Budget Objection Scenario</option>
+                            <option>Competitive Evaluation</option>
+                            <option>Discovery Call</option>
+                            <option>Closing Call</option>
+                        </select>
+                    </div>
+                    <button class="btn btn--primary" @click="startPractice">Start Practice Session</button>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="manager-dashboard-template">
+        <div class="manager-grid">
+            <div class="panel">
+                <team-monitoring></team-monitoring>
+            </div>
+
+            <div class="panel">
+                <h3>Team Performance</h3>
+                <div class="chart-container" style="position: relative; height: 300px;">
+                    <canvas ref="teamPerformanceChart"></canvas>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Alert Management</h3>
+                <div class="alerts-list">
+                    <div v-for="alert in alerts" :key="alert.id" :class="['alert', alert.priority]">
+                        <span class="icon">{{ alert.icon }}</span>
+                        <div class="alert-content">
+                            <p>{{ alert.message }}</p>
+                            <span class="time">{{ alert.time }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>Whisper Coaching</h3>
+                <div class="coaching-interface">
+                    <div class="active-call-info">
+                        <span>Coaching: {{ callSession.salesRep }}</span>
+                        <span class="status live">LIVE</span>
+                    </div>
+                    <textarea class="form-control" v-model="whisperMessage" placeholder="Type coaching message..." rows="3"></textarea>
+                    <button class="btn btn--primary" @click="sendWhisper">Send Whisper</button>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <!-- Component Templates -->
+    <script type="text/x-template" id="call-controls-template">
+        <div>
+            <h3>Call Controls</h3>
+            <div class="call-info">
+                <div class="call-participants">
+                    <div class="participant">
+                        <div class="avatar">{{ getInitials(callSession.salesRep) }}</div>
+                        <div class="info">
+                            <span class="name">{{ callSession.salesRep }}</span>
+                            <span class="role">Sales Rep</span>
+                        </div>
+                    </div>
+                    <div class="participant">
+                        <div class="avatar">{{ getInitials(callSession.prospect) }}</div>
+                        <div class="info">
+                            <span class="name">{{ callSession.prospect }}</span>
+                            <span class="role">{{ callSession.company }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="call-timer">
+                    <span class="timer">{{ formattedDuration }}</span>
+                </div>
+            </div>
+            <div class="control-buttons">
+                <button class="btn btn--primary" @click="startSimulation" :disabled="isSimulationRunning">
+                    {{ isSimulationRunning ? 'Running...' : 'Start Simulation' }}
+                </button>
+                <button class="btn btn--secondary" @click="pauseSimulation" :disabled="!isSimulationRunning">Pause</button>
+                <button class="btn btn--outline" @click="stopSimulation" :disabled="!isSimulationRunning">Stop</button>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="live-transcription-template">
+        <div>
+            <h3>Live Transcription</h3>
+            <div class="transcript-container" ref="transcriptContainer">
+                <div v-for="entry in displayedTranscript" :key="entry.id" :class="['transcript-message', entry.type]">
+                    <span class="speaker">{{ entry.speaker }}</span>
+                    <span class="text">{{ entry.text }}</span>
+                    <span class="timestamp">{{ entry.timestamp }}</span>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="sentiment-analysis-template">
+        <div>
+            <h3>Live Sentiment Analysis</h3>
+            <div class="sentiment-display">
+                <div class="sentiment-score">
+                    <span :class="['score', sentimentClass]">{{ formattedSentiment }}</span>
+                    <span class="label">{{ sentimentLabel }}</span>
+                </div>
+                <div class="sentiment-chart-container">
+                    <canvas ref="sentimentChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="talk-listen-ratio-template">
+        <div class="metric-card">
+            <h4>Talk/Listen Ratio</h4>
+            <div class="ratio-gauge">
+                <canvas ref="talkListenChart" width="120" height="120"></canvas>
+            </div>
+            <div class="ratio-labels">
+                <span class="rep-ratio">Rep: <span>{{ metrics.talkListenRatio.rep }}%</span></span>
+                <span class="prospect-ratio">Prospect: <span>{{ metrics.talkListenRatio.prospect }}%</span></span>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="speaking-pace-template">
+        <div class="metric-card">
+            <h4>Speaking Pace</h4>
+            <div class="pace-display">
+                <span class="pace-number">{{ metrics.speakingPace.current }}</span>
+                <span class="pace-unit">WPM</span>
+            </div>
+            <div :class="['pace-status', paceStatus]">{{ paceStatusText }}</div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="filler-words-template">
+        <div class="metric-card">
+            <h4>Filler Words</h4>
+            <div class="filler-count">
+                <span class="count">{{ metrics.fillerWords.count }}</span>
+            </div>
+            <div class="filler-types">um, actually</div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="rta-cards-template">
+        <div>
+            <h3>Real-Time Assist</h3>
+            <div class="rta-cards">
+                <div v-for="card in activeCards" :key="card.id" :class="['rta-card', card.type]">
+                    <div class="card-header">
+                        <span class="trigger-word">{{ card.trigger }}</span>
+                        <span class="card-type">{{ card.type }}</span>
+                    </div>
+                    <h4>{{ card.title }}</h4>
+                    <p>{{ card.content }}</p>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="whisper-controls-template">
+        <div>
+            <h3>Manager Controls</h3>
+            <div class="control-actions">
+                <button class="btn btn--outline btn--sm">🎧 Silent Monitor</button>
+                <button class="btn btn--outline btn--sm">💬 Whisper Coach</button>
+                <button class="btn btn--secondary btn--sm">📞 Barge In</button>
+            </div>
+            <div class="keyword-alerts">
+                <h4>Keyword Alerts</h4>
+                <div v-for="alert in keywordAlerts" :key="alert.id" :class="['alert-item', alert.type]">
+                    <span class="keyword">{{ alert.keyword }}</span>
+                    <span class="time">{{ alert.time }}</span>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="call-summary-template">
+        <div>
+            <h3>Call Summary</h3>
+            <div class="summary-stats">
+                <div class="stat">
+                    <span class="label">Duration</span>
+                    <span class="value">{{ callSession.duration }}</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Overall Score</span>
+                    <span class="value score-good">{{ coaching.scorecard.overall }}/100</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Sentiment</span>
+                    <span class="value positive">{{ sentimentLabel }}</span>
+                </div>
+            </div>
+            <div class="ai-summary">
+                <h4>AI-Generated Summary</h4>
+                <p>Strong discovery call with {{ callSession.company }}. Prospect showed clear pain points with current Salesforce setup and demonstrated buying interest when ROI was discussed. Key competitors: HubSpot, Pipedrive. Budget concerns addressed successfully.</p>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="smart-trackers-template">
+        <div>
+            <h3>Smart Trackers</h3>
+            <div class="trackers-grid">
+                <div v-for="(value, key) in analytics.smartTrackers" :key="key" class="tracker">
+                    <span class="label">{{ formatTrackerLabel(key) }}</span>
+                    <div class="progress-bar">
+                        <div class="progress" :style="{ width: value + '%' }"></div>
+                    </div>
+                    <span class="value">{{ value }}%</span>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="performance-scorecard-template">
+        <div>
+            <h3>Performance Scorecard</h3>
+            <div class="scorecard">
+                <div v-for="(score, category) in coaching.scorecard" :key="category" class="score-item" v-if="category !== 'overall'">
+                    <span class="category">{{ formatScoreCategory(category) }}</span>
+                    <span class="score">{{ score }}/100</span>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="coaching-panel-template">
+        <div>
+            <h3>Coaching Insights</h3>
+            <div class="insights-list">
+                <div v-for="(insight, index) in coaching.insights" :key="index" :class="['insight', getInsightType(insight)]">
+                    <span class="icon">{{ getInsightIcon(insight) }}</span>
+                    <p>{{ insight }}</p>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-template" id="team-monitoring-template">
+        <div>
+            <h3>Live Team Monitoring</h3>
+            <div class="team-grid">
+                <div v-for="member in team" :key="member.id" :class="['team-member', member.status.replace('_', '-')]">
+                    <div class="member-info">
+                        <div class="avatar">{{ getInitials(member.name) }}</div>
+                        <div class="details">
+                            <span class="name">{{ member.name }}</span>
+                            <span class="status">{{ formatStatus(member.status) }} {{ member.callDuration !== '00:00' ? '- ' + member.callDuration : '' }}</span>
+                        </div>
+                    </div>
+                    <div class="member-metrics">
+                        <span :class="['sentiment', getSentimentClass(member.sentiment)]">{{ formatSentiment(member.sentiment) }}</span>
+                        <span class="performance">{{ member.performance }}%</span>
+                    </div>
+                    <div class="member-actions">
+                        <button v-if="member.status === 'on_call'" class="btn btn--outline btn--sm">Monitor</button>
+                        <button v-if="member.status === 'on_call'" class="btn btn--secondary btn--sm">Coach</button>
+                        <button v-if="member.status === 'available'" class="btn btn--outline btn--sm">Assign Call</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script src="app.js"></script>
+</body>
+</html>

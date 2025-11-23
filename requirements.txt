@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+llama-index
+llama-index-llms-gemini
+llama-index-embeddings-gemini
+llama-index-vector-stores-chroma
+llama-index-readers-file
+chromadb
+sqlalchemy
+python-multipart
+python-dotenv
+pytest
+httpx
+python-jose[cryptography]
+passlib[argon2]

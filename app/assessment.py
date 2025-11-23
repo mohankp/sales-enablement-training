@@ -1,0 +1,156 @@
+import json
+import random
+from sqlalchemy.orm import Session
+from app.models import AssessmentSession, QuestionHistory, Topic, User, TopicScore
+from llama_index.core import VectorStoreIndex
+from llama_index.vector_stores.chroma import ChromaVectorStore
+import chromadb
+from app.config import settings
+from llama_index.core import Settings as LlamaSettings
+
+# Re-initialize Chroma (should be a singleton in real app)
+db_client = chromadb.PersistentClient(path=settings.CHROMA_DB_DIR)
+chroma_collection = db_client.get_or_create_collection("sales_knowledge_base")
+vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
+
+def start_new_session(db: Session, user_id: int):
+    # Check if user exists, if not create (simple logic for now)
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        user = User(id=user_id, username=f"user_{user_id}")
+        db.add(user)
+        db.commit()
+
+    session = AssessmentSession(user_id=user_id, current_level="Beginner", score=0.0)
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+def generate_question(db: Session, session_id: int):
+    session = db.query(AssessmentSession).filter(AssessmentSession.id == session_id).first()
+    if not session:
+        return None
+    
+    # Logic to pick a topic
+    topics = db.query(Topic).all()
+    if not topics:
+        return {"error": "No topics found. Please ingest a PDF first."}
+    
+    topic = random.choice(topics)
+
+    # Generate Question using LLM with strict JSON format
+    query_engine = index.as_query_engine()
+    prompt = (
+        f"Generate a {session.current_level} level multiple-choice question about '{topic.name}'. "
+        "The output must be a valid JSON object with the following keys: "
+        "'question', 'options' (list of 4 strings), 'correct_answer' (string, must be one of the options). "
+        "Do not include any markdown formatting or explanations."
+    )
+    response = query_engine.query(prompt)
+    
+    try:
+        # Clean up response if it contains markdown code blocks
+        response_text = str(response).strip()
+        if response_text.startswith("```json"):
+            response_text = response_text[7:-3]
+        elif response_text.startswith("```"):
+            response_text = response_text[3:-3]
+            
+        question_data = json.loads(response_text)
+        
+        # Store question in history (pending answer)
+        history = QuestionHistory(
+            session_id=session.id,
+            topic_id=topic.id,
+            question_text=question_data['question'],
+            correct_answer=question_data['correct_answer'],
+            is_correct=0 # Default
+        )
+        db.add(history)
+        db.commit()
+        
+        return {
+            "session_id": session.id,
+            "level": session.current_level,
+            "topic": topic.name,
+            "question": question_data['question'],
+            "options": question_data['options']
+        }
+    except json.JSONDecodeError:
+        return {"error": "Failed to generate valid JSON question", "raw_response": str(response)}
+
+def submit_answer(db: Session, session_id: int, user_answer: str, question_text: str):
+    session = db.query(AssessmentSession).filter(AssessmentSession.id == session_id).first()
+    if not session:
+        return {"error": "Session not found"}
+        
+    # Find the last question for this session matching the text
+    # In a real app, we'd pass the question_id, but for now we match text
+    history = db.query(QuestionHistory).filter(
+        QuestionHistory.session_id == session.id,
+        QuestionHistory.question_text == question_text
+    ).order_by(QuestionHistory.id.desc()).first()
+    
+    if not history:
+        return {"error": "Question not found in history"}
+    
+    history.user_answer = user_answer
+    
+    # Evaluate
+    is_correct = (user_answer.strip().lower() == history.correct_answer.strip().lower())
+    history.is_correct = 1 if is_correct else 0
+    
+    feedback = "Correct!"
+    if not is_correct:
+        # Generate explanation using LLM
+        query_engine = index.as_query_engine()
+        prompt = (
+            f"The user answered '{user_answer}' to the question '{question_text}'. "
+            f"The correct answer is '{history.correct_answer}'. "
+            "Provide a brief explanation of why the answer is incorrect and explain the correct concept."
+        )
+        response = query_engine.query(prompt)
+        feedback = str(response)
+    
+    history.feedback = feedback
+    
+    # Update Score and Level
+    # Simple logic: +10 for correct. If score > 50, move to Intermediate. If > 100, Advanced.
+    if is_correct:
+        session.score += 10
+        
+        # Update Topic Score
+        topic_score = db.query(TopicScore).filter(
+            TopicScore.user_id == session.user_id,
+            TopicScore.topic_id == history.topic_id
+        ).first()
+        
+        if not topic_score:
+            topic_score = TopicScore(user_id=session.user_id, topic_id=history.topic_id, score=0.0)
+            db.add(topic_score)
+            
+        topic_score.score += 10
+        
+        # Update Topic Proficiency
+        if topic_score.score >= 30:
+            topic_score.proficiency_level = "Intermediate"
+        if topic_score.score >= 60:
+            topic_score.proficiency_level = "Advanced"
+            
+    # Update Session Level based on overall score (simplified)
+    if session.score >= 50 and session.current_level == "Beginner":
+        session.current_level = "Intermediate"
+    elif session.score >= 100 and session.current_level == "Intermediate":
+        session.current_level = "Advanced"
+        
+    db.commit()
+    
+    return {
+        "correct": is_correct,
+        "feedback": feedback,
+        "current_score": session.score,
+        "current_level": session.current_level,
+        "topic_score": topic_score.score if is_correct else 0 # Return current topic score
+    }
