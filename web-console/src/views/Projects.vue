@@ -37,9 +37,13 @@
           <h4>Upload Training Material</h4>
           <div class="upload-box">
             <input type="file" @change="handleFileChange" accept=".pdf" class="form-control" />
-            <button @click="uploadToProject" :disabled="!selectedFile" class="btn btn--secondary">
-              Upload PDF
+            <button @click="uploadToProject" :disabled="!selectedFile || isUploading" class="btn btn--secondary upload-btn">
+              <span v-if="isUploading" class="spinner"></span>
+              <span v-else>Upload PDF</span>
             </button>
+          </div>
+          <div v-if="uploadMessage" :class="['message', `message--${uploadMessageType}`]">
+            {{ uploadMessage }}
           </div>
         </div>
 
@@ -92,6 +96,11 @@ const showCreateModal = ref(false)
 const newProject = ref({ name: '', description: '' })
 const selectedFile = ref(null)
 
+// Upload State
+const isUploading = ref(false)
+const uploadMessage = ref('')
+const uploadMessageType = ref('') // 'success' or 'error'
+
 const fetchProjects = async () => {
   try {
     const response = await axios.get('http://localhost:8000/api/v1/projects/', {
@@ -105,6 +114,7 @@ const fetchProjects = async () => {
 
 const selectProject = async (project) => {
   selectedProject.value = project
+  uploadMessage.value = '' // Clear message on project switch
   try {
     const response = await axios.get(`http://localhost:8000/api/v1/projects/${project.id}/topics`, {
       headers: { 'Authorization': `Bearer ${authStore.token}` }
@@ -130,10 +140,14 @@ const createProject = async () => {
 
 const handleFileChange = (event) => {
   selectedFile.value = event.target.files[0]
+  uploadMessage.value = ''
 }
 
 const uploadToProject = async () => {
   if (!selectedFile.value || !selectedProject.value) return
+  
+  isUploading.value = true
+  uploadMessage.value = ''
   
   const formData = new FormData()
   formData.append('file', selectedFile.value)
@@ -146,10 +160,15 @@ const uploadToProject = async () => {
         'Content-Type': 'multipart/form-data'
       }
     })
-    alert('Upload started for project')
+    uploadMessage.value = 'Upload started successfully! Processing in background.'
+    uploadMessageType.value = 'success'
     selectedFile.value = null
+    // Optionally refresh topics after a delay or setup polling
   } catch (e) {
-    alert('Upload failed')
+    uploadMessage.value = 'Upload failed. Please try again.'
+    uploadMessageType.value = 'error'
+  } finally {
+    isUploading.value = false
   }
 }
 
@@ -220,6 +239,48 @@ onMounted(() => {
   display: flex;
   gap: var(--space-8);
   margin-top: var(--space-8);
+  align-items: center;
+}
+
+.upload-btn {
+  min-width: 120px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.message {
+  margin-top: var(--space-8);
+  padding: var(--space-8);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+}
+
+.message--success {
+  background-color: #d1fae5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.message--error {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+/* Spinner */
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: #fff;
+  animation: spin 1s ease-in-out infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .topic-list {

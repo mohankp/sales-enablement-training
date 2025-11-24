@@ -59,6 +59,52 @@ def generate_question(db: Session, session_id: int):
 
     # Generate Question using LLM with strict JSON format
     # Filter retrieval by project_id if applicable
+    
+    # NEW LOGIC: Try to get from QuestionBank first
+    from app.models import QuestionBank, QuestionHistory
+    import json
+
+    # Get IDs of questions already answered in this session
+    answered_ids = db.query(QuestionHistory.question_text).filter(QuestionHistory.session_id == session_id).all()
+    # Note: QuestionHistory stores text, not ID currently. 
+    # Ideally we should link to QuestionBank ID, but for now we filter by text or just random pick and hope?
+    # Let's try to filter by text if possible, or just pick random and check.
+    answered_texts = [a[0] for a in answered_ids]
+
+    # Query QuestionBank
+    q_query = db.query(QuestionBank).filter(
+        QuestionBank.topic_id == topic.id,
+        QuestionBank.difficulty == session.current_level
+    )
+    if answered_texts:
+        q_query = q_query.filter(QuestionBank.question_text.notin_(answered_texts))
+    
+    available_questions = q_query.all()
+    
+    if available_questions:
+        # Pick one
+        q = random.choice(available_questions)
+        
+        # Store question in history (pending answer)
+        history = QuestionHistory(
+            session_id=session.id,
+            topic_id=topic.id,
+            question_text=q.question_text,
+            correct_answer=q.correct_answer,
+            is_correct=0 # Default
+        )
+        db.add(history)
+        db.commit()
+
+        return {
+            "session_id": session.id,
+            "level": session.current_level,
+            "topic": topic.name,
+            "question": q.question_text,
+            "options": json.loads(q.choices)
+        }
+    
+    # Fallback to dynamic generation if no pre-generated questions found
     filters = None
     if session.project_id:
         filters = MetadataFilters(
@@ -69,26 +115,28 @@ def generate_question(db: Session, session_id: int):
     prompt = (
         f"Generate a {session.current_level} level multiple-choice question about '{topic.name}'. "
         "The output must be a valid JSON object with the following keys: "
-        "'question', 'options' (list of 4 strings), 'correct_answer' (string, must be one of the options). "
-        "Do not include any markdown formatting or explanations."
+        "'question_text', 'choices' (list of 4 strings), 'correct_answer' (string, must match one choice exactly). "
+        "Do not include markdown formatting like ```json."
     )
+    
     response = query_engine.query(prompt)
     
+    # Parse JSON
     try:
-        # Clean up response if it contains markdown code blocks
-        response_text = str(response).strip()
-        if response_text.startswith("```json"):
-            response_text = response_text[7:-3]
-        elif response_text.startswith("```"):
-            response_text = response_text[3:-3]
+        json_str = str(response).strip()
+        # Remove markdown code blocks if present
+        if json_str.startswith("```json"):
+            json_str = json_str[7:]
+        if json_str.endswith("```"):
+            json_str = json_str[:-3]
             
-        question_data = json.loads(response_text)
-        
+        question_data = json.loads(json_str)
+
         # Store question in history (pending answer)
         history = QuestionHistory(
             session_id=session.id,
             topic_id=topic.id,
-            question_text=question_data['question'],
+            question_text=question_data['question_text'],
             correct_answer=question_data['correct_answer'],
             is_correct=0 # Default
         )
@@ -99,8 +147,8 @@ def generate_question(db: Session, session_id: int):
             "session_id": session.id,
             "level": session.current_level,
             "topic": topic.name,
-            "question": question_data['question'],
-            "options": question_data['options']
+            "question": question_data['question_text'],
+            "options": question_data['choices']
         }
     except json.JSONDecodeError:
         return {"error": "Failed to generate valid JSON question", "raw_response": str(response)}

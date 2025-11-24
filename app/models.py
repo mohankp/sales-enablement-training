@@ -84,3 +84,14 @@ class TopicScore(Base):
     
     user = relationship("User")
     topic = relationship("Topic")
+class QuestionBank(Base):
+    __tablename__ = "question_bank"
+    id = Column(Integer, primary_key=True, index=True)
+    topic_id = Column(Integer, ForeignKey("topics.id"))
+    question_text = Column(Text)
+    choices = Column(Text) # JSON string
+    correct_answer = Column(Text)
+    difficulty = Column(String) # Beginner, Intermediate, Advanced
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    topic = relationship("Topic")

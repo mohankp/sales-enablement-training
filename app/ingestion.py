@@ -62,15 +62,68 @@ async def process_pdf_background(file_path: str, filename: str, job_id: int, con
         
         topics_list = [t.strip() for t in str(response).split(",") if t.strip()]
         
+        topics_list = [t.strip() for t in str(response).split(",") if t.strip()]
+        
+        from app.models import QuestionBank
+        import json
+
         for topic_name in topics_list:
             # Check if exists in this project
             existing = db.query(Topic).filter(Topic.name == topic_name, Topic.project_id == project_id).first()
             if not existing:
                 new_topic = Topic(name=topic_name, description=f"Extracted from {filename}", project_id=project_id)
                 db.add(new_topic)
-        
+                db.commit()
+                db.refresh(new_topic)
+                topic_id = new_topic.id
+            else:
+                topic_id = existing.id
+
+            # Generate Questions for this topic (3 per level)
+            levels = ["Beginner", "Intermediate", "Advanced"]
+            for level in levels:
+                # Check if we already have questions for this topic/level to avoid re-generating on re-process
+                # (Optional optimization, skipping for now to ensure we get fresh ones if requested)
+                
+                q_prompt = (
+                    f"Generate 3 {level} level multiple-choice questions about '{topic_name}' based on the document context. "
+                    "Return a JSON array of objects. Each object must have: "
+                    "'question_text', 'choices' (list of 4 strings), 'correct_answer' (string, must match one choice exactly). "
+                    "Do not include markdown formatting like ```json."
+                )
+                
+                # We can use the index to query specifically for this topic to get better context
+                # But for now, general query engine is fine, maybe add topic focus
+                q_query_engine = index.as_query_engine()
+                q_response = q_query_engine.query(q_prompt)
+                
+                try:
+                    # Clean response
+                    json_str = str(q_response).strip()
+                    if json_str.startswith("```json"):
+                        json_str = json_str[7:]
+                    if json_str.endswith("```"):
+                        json_str = json_str[:-3]
+                    
+                    questions_data = json.loads(json_str)
+                    
+                    for q_data in questions_data:
+                        new_q = QuestionBank(
+                            topic_id=topic_id,
+                            question_text=q_data['question_text'],
+                            choices=json.dumps(q_data['choices']),
+                            correct_answer=q_data['correct_answer'],
+                            difficulty=level
+                        )
+                        db.add(new_q)
+                    db.commit()
+                except Exception as e:
+                    print(f"Failed to generate/parse questions for {topic_name} ({level}): {e}")
+                    # Continue to next level/topic
+                    continue
+
         job.status = "Completed"
-        job.message = f"Extracted {len(topics_list)} topics."
+        job.message = f"Extracted {len(topics_list)} topics and generated questions."
         if context:
             job.message += f" (Context: {context})"
         db.commit()
