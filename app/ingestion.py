@@ -26,7 +26,7 @@ import asyncio
 from fastapi import BackgroundTasks
 from app.models import ProcessingJob
 
-async def process_pdf_background(file_path: str, filename: str, job_id: int, context: str = None):
+async def process_pdf_background(file_path: str, filename: str, job_id: int, context: str = None, project_id: int = None):
     db = SessionLocal()
     job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
     job.status = "Processing"
@@ -41,11 +41,9 @@ async def process_pdf_background(file_path: str, filename: str, job_id: int, con
             doc.metadata["filename"] = filename
             if context:
                 doc.metadata["context"] = context
+            if project_id:
+                doc.metadata["project_id"] = str(project_id)
 
-        # If reprocessing (context provided), we might want to clear old chunks for this file
-        # For now, we'll just append. In a real app, we'd delete by metadata.
-        # vector_store.delete(where={"filename": filename}) 
-        
         # Create Index (This chunks and embeds automatically)
         index = VectorStoreIndex.from_documents(
             documents, storage_context=storage_context
@@ -65,10 +63,10 @@ async def process_pdf_background(file_path: str, filename: str, job_id: int, con
         topics_list = [t.strip() for t in str(response).split(",") if t.strip()]
         
         for topic_name in topics_list:
-            # Check if exists
-            existing = db.query(Topic).filter(Topic.name == topic_name).first()
+            # Check if exists in this project
+            existing = db.query(Topic).filter(Topic.name == topic_name, Topic.project_id == project_id).first()
             if not existing:
-                new_topic = Topic(name=topic_name, description=f"Extracted from {filename}")
+                new_topic = Topic(name=topic_name, description=f"Extracted from {filename}", project_id=project_id)
                 db.add(new_topic)
         
         job.status = "Completed"
@@ -87,7 +85,7 @@ async def process_pdf_background(file_path: str, filename: str, job_id: int, con
         if os.path.exists(file_path):
             os.remove(file_path)
 
-async def process_pdf_document(file: UploadFile, background_tasks: BackgroundTasks, context: str = None):
+async def process_pdf_document(file: UploadFile, background_tasks: BackgroundTasks, context: str = None, project_id: int = None):
     # Save temp file
     temp_dir = "temp_ingest"
     os.makedirs(temp_dir, exist_ok=True)
@@ -98,7 +96,7 @@ async def process_pdf_document(file: UploadFile, background_tasks: BackgroundTas
     
     # Create Job
     db = SessionLocal()
-    job = ProcessingJob(filename=file.filename, status="Pending")
+    job = ProcessingJob(filename=file.filename, status="Pending", project_id=project_id)
     if context:
         job.message = f"Queued with context: {context}"
     db.add(job)
@@ -106,6 +104,6 @@ async def process_pdf_document(file: UploadFile, background_tasks: BackgroundTas
     db.refresh(job)
     db.close()
     
-    background_tasks.add_task(process_pdf_background, file_path, file.filename, job.id, context)
+    background_tasks.add_task(process_pdf_background, file_path, file.filename, job.id, context, project_id)
     
     return {"status": "queued", "job_id": job.id}

@@ -15,7 +15,8 @@ class JobSchema(BaseModel):
     filename: str
     status: str
     message: Optional[str]
-    created_at: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         orm_mode = True

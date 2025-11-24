@@ -3,6 +3,7 @@ import Login from '../views/Login.vue'
 import Dashboard from '../views/Dashboard.vue'
 import Results from '../views/Results.vue'
 import KnowledgeBase from '../views/KnowledgeBase.vue'
+import Projects from '../views/Projects.vue'
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
@@ -20,6 +21,12 @@ const router = createRouter({
             path: '/dashboard',
             name: 'dashboard',
             component: Dashboard,
+            meta: { requiresAuth: true }
+        },
+        {
+            path: '/projects',
+            name: 'projects',
+            component: Projects,
             meta: { requiresAuth: true }
         },
         {

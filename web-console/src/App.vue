@@ -16,6 +16,7 @@
     <!-- Navigation Tabs -->
     <nav class="nav-tabs" v-if="authStore.token">
       <router-link to="/dashboard" class="nav-tab" active-class="active">Dashboard</router-link>
+      <router-link to="/projects" class="nav-tab" active-class="active">Projects</router-link>
       <router-link to="/results" class="nav-tab" active-class="active">Results</router-link>
       <router-link to="/knowledge-base" class="nav-tab" active-class="active">Knowledge Base</router-link>
     </nav>

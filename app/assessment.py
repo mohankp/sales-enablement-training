@@ -14,7 +14,9 @@ chroma_collection = db_client.get_or_create_collection("sales_knowledge_base")
 vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
 index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
 
-def start_new_session(db: Session, user_id: int):
+from llama_index.core.vector_stores import MetadataFilters, ExactMatchFilter
+
+def start_new_session(db: Session, user_id: int, project_id: int = None, topic_id: int = None):
     # Check if user exists, if not create (simple logic for now)
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -22,7 +24,13 @@ def start_new_session(db: Session, user_id: int):
         db.add(user)
         db.commit()
 
-    session = AssessmentSession(user_id=user_id, current_level="Beginner", score=0.0)
+    session = AssessmentSession(
+        user_id=user_id, 
+        current_level="Beginner", 
+        score=0.0,
+        project_id=project_id,
+        topic_id=topic_id
+    )
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -34,14 +42,30 @@ def generate_question(db: Session, session_id: int):
         return None
     
     # Logic to pick a topic
-    topics = db.query(Topic).all()
-    if not topics:
-        return {"error": "No topics found. Please ingest a PDF first."}
-    
-    topic = random.choice(topics)
+    if session.topic_id:
+        topic = db.query(Topic).filter(Topic.id == session.topic_id).first()
+        if not topic:
+            return {"error": "Specified topic not found."}
+    else:
+        # Pick random topic from project or all
+        query = db.query(Topic)
+        if session.project_id:
+            query = query.filter(Topic.project_id == session.project_id)
+        topics = query.all()
+        
+        if not topics:
+            return {"error": "No topics found. Please ingest a PDF first."}
+        topic = random.choice(topics)
 
     # Generate Question using LLM with strict JSON format
-    query_engine = index.as_query_engine()
+    # Filter retrieval by project_id if applicable
+    filters = None
+    if session.project_id:
+        filters = MetadataFilters(
+            filters=[ExactMatchFilter(key="project_id", value=str(session.project_id))]
+        )
+
+    query_engine = index.as_query_engine(filters=filters)
     prompt = (
         f"Generate a {session.current_level} level multiple-choice question about '{topic.name}'. "
         "The output must be a valid JSON object with the following keys: "

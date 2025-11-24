@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from app.config import settings
 from app.models import Base
 from app.database import engine
-from app.routers import training, auth, admin
+from app.routers import training, auth, admin, projects
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title=settings.APP_NAME)
@@ -25,3 +25,4 @@ def read_root():
 app.include_router(training.router, prefix="/api/v1", tags=["training"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
+app.include_router(projects.router, prefix="/api/v1/projects", tags=["projects"])
