@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     DATABASE_URL: str = "sqlite:///./sales_training.db"
     CHROMA_DB_DIR: str = "./chroma_db"
+    ENABLE_LLM_EVALUATION: bool = True
 
     class Config:
         env_file = ".env"

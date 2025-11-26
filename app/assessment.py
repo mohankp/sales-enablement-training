@@ -171,7 +171,35 @@ def submit_answer(db: Session, session_id: int, user_answer: str, question_text:
     history.user_answer = user_answer
     
     # Evaluate
-    is_correct = (user_answer.strip().lower() == history.correct_answer.strip().lower())
+    def normalize_answer(text):
+        import re
+        # Remove all whitespace and convert to lower case
+        # Also remove common punctuation like . , -
+        text = str(text).lower()
+        text = re.sub(r'\s+', '', text) # Remove all whitespace
+        text = re.sub(r'[.,-]', '', text) # Remove punctuation
+        return text
+
+    is_correct = (normalize_answer(user_answer) == normalize_answer(history.correct_answer))
+    
+    # Fallback to LLM evaluation if strict match fails
+    if not is_correct and settings.ENABLE_LLM_EVALUATION:
+        try:
+            eval_query_engine = index.as_query_engine()
+            eval_prompt = (
+                f"The correct answer to the question '{question_text}' is '{history.correct_answer}'. "
+                f"The user answered '{user_answer}'. "
+                "Does the user's answer mean the same thing as the correct answer? "
+                "Ignore minor typos, formatting differences, or extra words if the core meaning is identical. "
+                "Return ONLY 'YES' or 'NO'."
+            )
+            eval_response = eval_query_engine.query(eval_prompt)
+            if str(eval_response).strip().upper() == "YES":
+                is_correct = True
+        except Exception as e:
+            print(f"LLM evaluation failed: {e}")
+            # Fallback to False if LLM fails
+
     history.is_correct = 1 if is_correct else 0
     
     feedback = "Correct!"
