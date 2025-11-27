@@ -101,7 +101,7 @@ def generate_question(db: Session, session_id: int):
             "level": session.current_level,
             "topic": topic.name,
             "question": q.question_text,
-            "options": json.loads(q.choices)
+            "options": [{"key": chr(65+i), "value": opt} for i, opt in enumerate(json.loads(q.choices))]
         }
     
     # Fallback to dynamic generation if no pre-generated questions found
@@ -112,46 +112,61 @@ def generate_question(db: Session, session_id: int):
         )
 
     query_engine = index.as_query_engine(filters=filters)
-    prompt = (
-        f"Generate a {session.current_level} level multiple-choice question about '{topic.name}'. "
-        "The output must be a valid JSON object with the following keys: "
-        "'question_text', 'choices' (list of 4 strings), 'correct_answer' (string, must match one choice exactly). "
-        "Do not include markdown formatting like ```json."
-    )
     
-    response = query_engine.query(prompt)
-    
-    # Parse JSON
-    try:
-        json_str = str(response).strip()
-        # Remove markdown code blocks if present
-        if json_str.startswith("```json"):
-            json_str = json_str[7:]
-        if json_str.endswith("```"):
-            json_str = json_str[:-3]
-            
-        question_data = json.loads(json_str)
-
-        # Store question in history (pending answer)
-        history = QuestionHistory(
-            session_id=session.id,
-            topic_id=topic.id,
-            question_text=question_data['question_text'],
-            correct_answer=question_data['correct_answer'],
-            is_correct=0 # Default
+    # Retry loop to avoid duplicates
+    max_retries = 3
+    for attempt in range(max_retries):
+        prompt = (
+            f"Generate a {session.current_level} level multiple-choice question about '{topic.name}'. "
+            "The output must be a valid JSON object with the following keys: "
+            "'question_text', 'choices' (list of 4 strings), 'correct_answer' (string, must match one choice exactly). "
+            "Do not include markdown formatting like ```json."
         )
-        db.add(history)
-        db.commit()
+        # Add variation to prompt on retries
+        if attempt > 0:
+            prompt += f" Ensure the question is different from previous ones. Attempt {attempt+1}."
         
-        return {
-            "session_id": session.id,
-            "level": session.current_level,
-            "topic": topic.name,
-            "question": question_data['question_text'],
-            "options": question_data['choices']
-        }
-    except json.JSONDecodeError:
-        return {"error": "Failed to generate valid JSON question", "raw_response": str(response)}
+        response = query_engine.query(prompt)
+        
+        # Parse JSON
+        try:
+            json_str = str(response).strip()
+            # Remove markdown code blocks if present
+            if json_str.startswith("```json"):
+                json_str = json_str[7:]
+            if json_str.endswith("```"):
+                json_str = json_str[:-3]
+                
+            question_data = json.loads(json_str)
+            
+            # Check if duplicate
+            if question_data['question_text'] in answered_texts:
+                print(f"Duplicate generated: {question_data['question_text'][:30]}... Retrying.")
+                continue
+
+            # Store question in history (pending answer)
+            history = QuestionHistory(
+                session_id=session.id,
+                topic_id=topic.id,
+                question_text=question_data['question_text'],
+                correct_answer=question_data['correct_answer'],
+                is_correct=0 # Default
+            )
+            db.add(history)
+            db.commit()
+            
+            return {
+                "session_id": session.id,
+                "level": session.current_level,
+                "topic": topic.name,
+                "question": question_data['question_text'],
+                "options": [{"key": chr(65+i), "value": opt} for i, opt in enumerate(question_data['choices'])]
+            }
+        except json.JSONDecodeError:
+            print(f"Error parsing JSON: {response}")
+            continue
+            
+    return {"error": "Failed to generate a unique question after retries."}
 
 def submit_answer(db: Session, session_id: int, user_answer: str, question_text: str):
     session = db.query(AssessmentSession).filter(AssessmentSession.id == session_id).first()
@@ -170,6 +185,31 @@ def submit_answer(db: Session, session_id: int, user_answer: str, question_text:
     
     history.user_answer = user_answer
     
+    # Check if answer is an option (A, B, C, D or Option A, etc.)
+    # and map it to the actual text if possible
+    import re
+    from app.models import QuestionBank
+    
+    # Normalize to just the letter if it looks like an option
+    option_match = re.match(r'^(?:option\s*)?([a-d])$', user_answer.strip(), re.IGNORECASE)
+    if option_match:
+        letter = option_match.group(1).upper()
+        idx = ord(letter) - ord('A')
+        
+        # Try to find the question in QuestionBank to get choices
+        # Note: This relies on question_text being unique enough or matching exactly
+        qb_entry = db.query(QuestionBank).filter(QuestionBank.question_text == question_text).first()
+        
+        if qb_entry and qb_entry.choices:
+            try:
+                choices = json.loads(qb_entry.choices)
+                if 0 <= idx < len(choices):
+                    # Replace user_answer with the actual text of the choice
+                    user_answer = choices[idx]
+                    print(f"Mapped option {letter} to '{user_answer}'")
+            except Exception as e:
+                print(f"Failed to map option: {e}")
+
     # Evaluate
     def normalize_answer(text):
         import re
